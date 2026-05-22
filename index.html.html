@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لعبة صراحة أو تحدي - المتعة والإثارة بالأونلاين</title>
+    <!-- Tailwind CSS للتحكم بالتصميم العصري -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- مكتبة الأيقونات Lucide -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- مكتبة MQTT للربط الفوري ومزامنة الأونلاين بدون سيرفر خارجي -->
+    <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght=300;400;600;700;800&display=swap');
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .card-flip {
+            perspective: 1000px;
+        }
+        .card-inner {
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .card-flipped {
+            transform: rotateY(180deg);
+        }
+        .card-front, .card-back {
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+        .card-back {
+            transform: rotateY(180deg);
+        }
+        /* حركة تدوير زجاجة المشروب */
+        #bottle {
+            transition: transform 3s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+    </style>
+</head>
+<body class="min-h-screen text-white flex flex-col justify-between overflow-x-hidden p-4 md:p-6 selection:bg-purple-600 selection:text-white">
+
+    <!-- الخلفية المتحركة الطفيفة -->
+    <div class="fixed inset-0 -z-10 overflow-hidden pointer-events-none opacity-30">
+        <div class="absolute top-10 left-10 w-72 h-72 bg-purple-600 rounded-full filter blur-3xl animate-pulse"></div>
+        <div class="absolute bottom-10 right-10 w-96 h-96 bg-pink-600 rounded-full filter blur-3xl animate-pulse" style="animation-delay: 2s;"></div>
+    </div>
+
+    <!-- ترويسة الموقع مع مؤشرات الاتصال بالشبكة للأونلاين -->
+    <header class="w-full max-w-4xl mx-auto flex items-center justify-between py-4 border-b border-slate-800 mb-6">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-gradient-to-tr from-purple-600 to-pink-500 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/30">
+                <i data-lucide="sparkles" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-xl md:text-2xl font-black bg-gradient-to-r from-purple-400 via-pink-400 to-red-400 bg-clip-text text-transparent">صراحة أو تحدي</h1>
+                <p id="onlineStatusHeader" class="text-[10px] md:text-xs text-slate-400">لعبة السهرات والأصدقاء مع ميزة تدوير الزجاجة والأونلاين</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="toggleAudio()" id="soundBtn" class="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 transition rounded-lg text-slate-300">
+                <i id="soundIcon" data-lucide="volume-2" class="w-5 h-5"></i>
+            </button>
+            <button onclick="confirmResetGame()" class="p-2 bg-red-950/40 hover:bg-red-900/40 border border-red-900/50 active:scale-95 transition rounded-lg text-red-400 flex items-center gap-1 text-sm">
+                <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                <span class="hidden sm:inline">إعادة ضبط</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- المحتوى الرئيسي للعبة -->
+    <main class="w-full max-w-md mx-auto flex-grow flex flex-col justify-center items-center gap-6">
+
+        <!-- مؤشر انتظار الأونلاين ومزامنة الحالة -->
+        <div id="onlineWaitingNotification" class="w-full bg-indigo-950/80 border border-indigo-500/30 px-4 py-2.5 rounded-xl text-xs text-indigo-300 flex items-center gap-2 justify-center hidden">
+            <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+            </span>
+            <span id="waitingStatusText">بانتظار دور بقية اللاعبين لتنفيذ الحركة...</span>
+        </div>
+
+        <!-- 1. شاشة البداية وإعداد اللاعبين والتصنيفات -->
+        <div id="setupScreen" class="w-full glass-panel rounded-2xl p-6 shadow-2xl space-y-6">
+            
+            <!-- أزرار اختيار وضع اللعب (محلي أم أونلاين) -->
+            <div class="space-y-2">
+                <label class="block text-sm font-bold text-slate-300">طريقة اللعب الحالية:</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="setGameMode('local')" id="btnModeLocal" class="p-3 rounded-xl border-2 border-purple-600 bg-purple-900/20 text-white font-bold flex flex-col items-center gap-1 transition-all">
+                        <i data-lucide="tablet" class="w-5 h-5 text-purple-400"></i>
+                        <span class="text-sm">لعب محلي (بنفس الهاتف)</span>
+                    </button>
+                    <button onclick="setGameMode('online')" id="btnModeOnline" class="p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold flex flex-col items-center gap-1 transition-all">
+                        <i data-lucide="globe" class="w-5 h-5 text-indigo-400"></i>
+                        <span class="text-sm">لعب أونلاين (عبر الغرف)</span>
+                    </button>
+                </div>
+            </div>
+
+            <hr class="border-slate-800/60" />
+
+            <!-- واجهة اللعب المحلي الافتراضية -->
+            <div id="localSetupArea" class="space-y-4">
+                <div class="text-center space-y-2">
+                    <h2 class="text-xl font-bold text-white">قائمة الأصدقاء المحليين</h2>
+                    <p class="text-xs text-slate-400">أدخل أسماء اللاعبين الجالسين معك (على الأقل لاعبين للبدء)</p>
+                </div>
+
+                <div class="flex gap-2">
+                    <input type="text" id="playerNameInput" placeholder="اكتب اسم اللاعب هنا..." class="flex-grow bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 transition text-sm">
+                    <button onclick="addPlayer()" class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 active:scale-95 transition-all text-white px-5 rounded-xl font-bold flex items-center justify-center gap-1 text-sm">
+                        <i data-lucide="plus" class="w-4 h-4"></i>
+                        <span>إضافة</span>
+                    </button>
+                </div>
+
+                <div class="space-y-2">
+                    <p class="text-xs text-slate-400 font-bold">اللاعبون الحاليون (<span id="playerCount">0</span>):</p>
+                    <div id="playersList" class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
+                        <span class="text-xs text-slate-500 italic py-1">لا يوجد لاعبين مضافين حالياً..</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- واجهة اللعب الأونلاين التفاعلية الجديدة -->
+            <div id="onlineSetupArea" class="space-y-4 hidden">
+                <div class="text-center space-y-2">
+                    <h2 class="text-xl font-bold text-indigo-400">الربط واللعب عن بعد</h2>
+                    <p class="text-xs text-slate-400">أنشئ غرفة جديدة وشارك الرمز، أو انضم لغرفة صديقك فوراً</p>
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">اسمك المستعار في الغرفة:</label>
+                        <input type="text" id="onlineNicknameInput" placeholder="اكتب اسمك للمجموعة..." class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition text-sm">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="createOnlineRoom()" class="bg-indigo-600 hover:bg-indigo-500 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 transition active:scale-95">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                            <span>إنشاء غرفة</span>
+                        </button>
+                        <button onclick="showJoinRoomFields()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 transition active:scale-95">
+                            <i data-lucide="link" class="w-4 h-4"></i>
+                            <span>الانضمام برمز</span>
+                        </button>
+                    </div>
+
+                    <!-- لوحة الانضمام للغرفة -->
+                    <div id="joinFieldsContainer" class="p-3 bg-slate-900/40 border border-slate-800 rounded-xl space-y-2 hidden">
+                        <input type="text" id="onlineRoomCodeInput" placeholder="أدخل رمز الغرفة (مثال: TRUTH-1234)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white placeholder-slate-600 uppercase text-center focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm">
+                        <button onclick="joinOnlineRoom()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-2 rounded-lg font-bold text-xs transition">
+                            تأكيد الانضمام للغرفة السحابية
+                        </button>
+                    </div>
+
+                    <!-- تفاصيل الغرفة بعد الإنشاء أو الانضمام -->
+                    <div id="activeRoomContainer" class="p-4 bg-indigo-950/20 border border-indigo-900/40 rounded-xl space-y-3 hidden">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-slate-400 font-semibold">رمز غرفتك السحابية:</span>
+                            <div class="flex items-center gap-1.5">
+                                <span id="lblRoomCode" class="text-sm font-extrabold text-indigo-400 tracking-widest bg-indigo-950/80 px-3 py-1 rounded border border-indigo-800/40 uppercase">TRUTH-0000</span>
+                                <button onclick="copyRoomCodeToClipboard()" class="p-1 bg-indigo-900/40 hover:bg-indigo-800/40 rounded border border-indigo-700/30 text-indigo-300">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="space-y-1.5">
+                            <p class="text-[11px] text-slate-400 font-bold">اللاعبون المتصلون بالغرفة (<span id="onlinePlayerCount">0</span>):</p>
+                            <div id="onlinePlayersList" class="flex flex-wrap gap-1.5 p-1 max-h-24 overflow-y-auto">
+                                <!-- يتم التحديث ديناميكياً -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- اختيار التصنيف للاعبين -->
+            <div class="space-y-3">
+                <label class="block text-sm font-bold text-slate-300">اختر نوع الأسئلة والتحديات:</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="selectCategory('classic')" id="cat-classic" class="category-btn p-3 rounded-xl border-2 border-purple-600 bg-purple-900/20 text-white font-bold flex flex-col items-center gap-1 transition-all">
+                        <i data-lucide="smile" class="w-6 h-6 text-purple-400"></i>
+                        <span class="text-sm">كلاسيكي متزن</span>
+                    </button>
+                    <button onclick="selectCategory('friends')" id="cat-friends" class="category-btn p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold flex flex-col items-center gap-1 transition-all">
+                        <i data-lucide="users" class="w-6 h-6 text-blue-400"></i>
+                        <span class="text-sm">للأصدقاء</span>
+                    </button>
+                    <button onclick="selectCategory('family')" id="cat-family" class="category-btn p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold flex flex-col items-center gap-1 transition-all">
+                        <i data-lucide="home" class="w-6 h-6 text-emerald-400"></i>
+                        <span class="text-sm">عائلي محترم</span>
+                    </button>
+                    <button onclick="selectCategory('daring')" id="cat-daring" class="category-btn p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold flex flex-col items-center gap-1 transition-all">
+                        <i data-lucide="flame" class="w-6 h-6 text-red-500"></i>
+                        <span class="text-sm">حماسي وقوي</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- زر بدء اللعب الكبير -->
+            <button onclick="triggerGameStart()" class="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 py-4 rounded-xl text-lg font-extrabold shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 transform active:scale-[0.98] transition">
+                <i data-lucide="play" class="w-6 h-6"></i>
+                <span id="txtStartBtn">ابدأ اللعبة السحرية!</span>
+            </button>
+        </div>
+
+
+        <!-- 1.5 شاشة تدوير القنينة واختيار الشخص عشوائياً -->
+        <div id="bottleScreen" class="w-full glass-panel rounded-2xl p-6 shadow-2xl space-y-6 text-center hidden">
+            <div class="space-y-1">
+                <span id="lblSpinRoleTag" class="px-3 py-1 bg-purple-900/40 border border-purple-500/30 text-purple-300 rounded-full text-xs font-bold uppercase">تحديد الدور</span>
+                <h3 class="text-2xl font-black text-white mt-2">دور القنينة السحرية</h3>
+                <p id="txtSpinInstruction" class="text-xs text-slate-400">انقر على الزجاجة لتدور وتختار الضحية التالية!</p>
+            </div>
+
+            <!-- لوحة القنينة الدائرية والتفاعلية -->
+            <div class="relative w-64 h-64 mx-auto flex items-center justify-center bg-slate-900/80 rounded-full border-4 border-slate-800 shadow-inner overflow-hidden">
+                <div class="absolute inset-0 flex items-center justify-between px-3 text-slate-700 pointer-events-none">
+                    <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                </div>
+                <div class="absolute inset-0 flex flex-col items-center justify-between py-3 text-slate-700 pointer-events-none">
+                    <i data-lucide="chevron-up" class="w-5 h-5"></i>
+                    <i data-lucide="chevron-down" class="w-5 h-5"></i>
+                </div>
+
+                <!-- الزجاجة المصممة بـ SVG نقي وشفاف -->
+                <div id="bottle" onclick="triggerBottleSpin()" class="relative w-16 h-48 cursor-pointer transform origin-center transition-all duration-300 hover:scale-105 active:scale-95 z-20">
+                    <svg viewBox="0 0 100 300" class="w-full h-full drop-shadow-[0_10px_15px_rgba(168,85,247,0.5)]" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="35" y="10" width="30" height="20" rx="5" fill="#f43f5e"/>
+                        <rect x="38" y="30" width="24" height="10" fill="#e11d48"/>
+                        <path d="M40 40 L40 90 L20 130 L20 270 A30 30 0 0 0 80 270 L80 130 L60 90 L60 40 Z" fill="url(#bottleGrad)" stroke="#c084fc" stroke-width="4"/>
+                        <path d="M24 140 L24 260 A26 26 0 0 0 76 260 L76 140 Z" fill="url(#liquidGrad)"/>
+                        <path d="M30 140 L30 250" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.3"/>
+                        <defs>
+                            <linearGradient id="bottleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#3b0764" stop-opacity="0.8"/>
+                                <stop offset="50%" stop-color="#6b21a8" stop-opacity="0.6"/>
+                                <stop offset="100%" stop-color="#3b0764" stop-opacity="0.8"/>
+                            </linearGradient>
+                            <linearGradient id="liquidGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#db2777"/>
+                                <stop offset="100%" stop-color="#9333ea"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                
+                <div class="absolute w-6 h-6 bg-purple-500 rounded-full border-4 border-white shadow-lg pointer-events-none z-30"></div>
+            </div>
+
+            <div id="bottleResult" class="min-h-[60px] flex flex-col items-center justify-center space-y-2">
+                <span class="text-sm text-slate-400">اضغط على القنينة للبدء بالدوران!</span>
+            </div>
+
+            <!-- زر الانتقال للمرحلة التالية بعد التحديد -->
+            <button id="nextToChoiceBtn" onclick="triggerChoiceScreenTransition()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all opacity-50 cursor-not-allowed" disabled>
+                <span>متابعة للاختيار</span>
+                <i data-lucide="arrow-left" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+
+        <!-- 2. شاشة اختيار (صراحة أو تحدي) للاعب الحالي -->
+        <div id="gameChoiceScreen" class="w-full glass-panel rounded-2xl p-6 shadow-2xl space-y-6 hidden">
+            <div class="text-center space-y-2">
+                <span class="px-3 py-1 bg-purple-900/50 border border-purple-500/30 text-purple-300 rounded-full text-xs font-bold uppercase tracking-wider">الدور الآن على</span>
+                <h3 id="currentPlayerName" class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-pink-500">أحمد</h3>
+                <p id="txtChoiceInstruction" class="text-xs text-slate-400">اختر مصيرك لتستمر في اللعب أو تخرج!</p>
+            </div>
+
+            <!-- أزرار الاختيار الكبرى -->
+            <div class="grid grid-cols-2 gap-4 h-48">
+                <!-- زر الصراحة -->
+                <button id="btnOptionTruth" onclick="triggerOptionChoice('truth')" class="group relative overflow-hidden bg-gradient-to-br from-cyan-600 to-blue-800 hover:from-cyan-500 hover:to-blue-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 shadow-lg shadow-cyan-950/50 active:scale-95 transition-all">
+                    <div class="absolute top-2 right-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <i data-lucide="help-circle" class="w-24 h-24 text-white"></i>
+                    </div>
+                    <div class="w-14 h-14 bg-white/10 rounded-full flex items-center justify-center border border-white/20">
+                        <i data-lucide="help-circle" class="w-8 h-8 text-cyan-200"></i>
+                    </div>
+                    <span class="text-2xl font-black tracking-wide">صراحة</span>
+                    <span class="text-[10px] text-cyan-200 bg-cyan-950/40 px-2 py-0.5 rounded-full">سؤال صادق</span>
+                </button>
+
+                <!-- زر التحدي -->
+                <button id="btnOptionDare" onclick="triggerOptionChoice('dare')" class="group relative overflow-hidden bg-gradient-to-br from-rose-600 to-red-800 hover:from-rose-500 hover:to-red-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 shadow-lg shadow-red-950/50 active:scale-95 transition-all">
+                    <div class="absolute top-2 right-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <i data-lucide="zap" class="w-24 h-24 text-white"></i>
+                    </div>
+                    <div class="w-14 h-14 bg-white/10 rounded-full flex items-center justify-center border border-white/20">
+                        <i data-lucide="zap" class="w-8 h-8 text-rose-200"></i>
+                    </div>
+                    <span class="text-2xl font-black tracking-wide">تحدي</span>
+                    <span class="text-[10px] text-rose-200 bg-rose-950/40 px-2 py-0.5 rounded-full">فعل جريء</span>
+                </button>
+            </div>
+
+            <!-- معلومات إضافية أو زر العودة -->
+            <button onclick="backToSetup()" class="w-full text-slate-400 hover:text-white transition py-2 text-sm flex items-center justify-center gap-1">
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                <span>العودة لإدارة اللاعبين</span>
+            </button>
+        </div>
+
+
+        <!-- 3. شاشة عرض بطاقة السؤال والتحدي -->
+        <div id="cardScreen" class="w-full space-y-6 hidden">
+            <div id="cardFlipContainer" class="card-flip w-full h-72 cursor-pointer">
+                <div id="cardInner" class="card-inner w-full h-full relative duration-500">
+                    
+                    <!-- واجهة البطاقة (قبل النقر للرؤية) -->
+                    <div id="cardFrontSide" onclick="triggerCardReveal()" class="card-front absolute inset-0 glass-panel rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-4 border-2 border-dashed border-purple-500/40 shadow-2xl">
+                        <div class="w-16 h-16 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center animate-bounce">
+                            <i data-lucide="eye-off" class="w-8 h-8 text-white"></i>
+                        </div>
+                        <h4 class="text-2xl font-black text-white">البطاقة جاهزة!</h4>
+                        <p id="txtCardFrontDesc" class="text-sm text-slate-300">اضغط على البطاقة لكشف المهمة المطلوبة منك</p>
+                        <span class="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-400 border border-slate-700">اضغط للقلب والبدء</span>
+                    </div>
+
+                    <!-- ظهر البطاقة (محتوى التحدي أو الصراحة) -->
+                    <div class="card-back absolute inset-0 rounded-2xl p-6 flex flex-col justify-between shadow-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950 border border-purple-500/30">
+                        <div class="flex items-center justify-between">
+                            <span id="cardBadge" class="px-3 py-1 rounded-full text-xs font-bold text-white uppercase tracking-wider">
+                                صراحة
+                            </span>
+                            <span id="cardPlayerTag" class="text-sm font-bold text-yellow-400">
+                                أحمد
+                            </span>
+                        </div>
+
+                        <div class="my-auto text-center px-2">
+                            <p id="cardMainText" class="text-lg md:text-xl font-bold text-white leading-relaxed">
+                                جار التحميل...
+                            </p>
+                        </div>
+
+                        <div class="flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/80 pt-3">
+                            <span>نفّذ لتكسب نقطة!</span>
+                            <div class="flex items-center gap-1">
+                                <i data-lucide="award" class="w-4 h-4 text-yellow-400"></i>
+                                <span>+1 نقطة</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- أزرار اتخاذ القرار بعد كشف البطاقة -->
+            <div id="actionButtons" class="hidden grid grid-cols-2 gap-4">
+                <button id="btnActionSuccess" onclick="triggerTurnResolve(true)" class="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 py-3 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all">
+                    <i data-lucide="check-circle" class="w-5 h-5"></i>
+                    <span>تم بنجاح!</span>
+                </button>
+                <button id="btnActionFail" onclick="triggerTurnResolve(false)" class="bg-gradient-to-r from-rose-600 to-pink-700 hover:from-rose-500 hover:to-pink-600 py-3 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all">
+                    <i data-lucide="x-circle" class="w-5 h-5"></i>
+                    <span>انسحاب (0 نقطة)</span>
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- قائمة النقاط والترتيب في الأسفل -->
+    <section class="w-full max-w-md mx-auto mt-6 glass-panel rounded-xl p-4 shadow-lg">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-bold text-slate-300 flex items-center gap-1">
+                <i data-lucide="medal" class="w-4 h-4 text-amber-400"></i>
+                <span>لوحة النقاط والترتيب</span>
+            </h3>
+            <span class="text-[10px] text-slate-500">الترتيب التلقائي بناءً على النقاط</span>
+        </div>
+        <div id="scoreBoard" class="space-y-2 max-h-36 overflow-y-auto pr-1">
+            <p class="text-xs text-slate-500 italic text-center py-2">لا يوجد لاعبين مسجلين لعرض النقاط.</p>
+        </div>
+    </section>
+
+    <!-- صندوق المحادثة والدردشة والاتصال الصوتي المباشر (أونلاين) -->
+    <section id="onlineChatSection" class="w-full max-w-md mx-auto mt-4 glass-panel rounded-xl p-4 shadow-lg hidden">
+        
+        <!-- قسم المحادثة الصوتية المتكامل (WebRTC Voice Room) -->
+        <div class="mb-4 bg-slate-900/50 border border-slate-800 p-3 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+                <h4 class="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
+                    <i data-lucide="phone-call" class="w-3.5 h-3.5 text-indigo-400"></i>
+                    <span>المحادثة الصوتية الجماعية (أونلاين)</span>
+                </h4>
+                <div class="flex items-center gap-1">
+                    <span id="voiceStatusDot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                    <span id="voiceStatusText" class="text-[9px] text-slate-400">غير متصل بالصوت</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button id="btnToggleVoiceChat" onclick="toggleWebRTCVoiceChat()" class="flex-grow bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                    <i data-lucide="mic" class="w-3.5 h-3.5"></i>
+                    <span id="voiceChatBtnText">دخول المحادثة الصوتية</span>
+                </button>
+                <button id="btnMuteVoice" onclick="toggleLocalVoiceMute()" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 hidden transition active:scale-95">
+                    <i id="micIcon" data-lucide="mic-off" class="w-4 h-4 text-red-400"></i>
+                </button>
+            </div>
+        </div>
+
+        <hr class="border-slate-800 mb-3" />
+
+        <!-- صندوق الدردشة النصية الافتراضي -->
+        <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-bold text-slate-300 flex items-center gap-1.5">
+                <i data-lucide="message-square" class="w-4 h-4 text-indigo-400"></i>
+                <span>الدردشة الفورية للغرفة</span>
+            </h3>
+            <span class="text-[10px] text-emerald-400 font-bold animate-pulse">● مباشر</span>
+        </div>
+        <!-- منطقة عرض الرسائل -->
+        <div id="chatMessages" class="space-y-2 h-32 overflow-y-auto pr-1 text-xs mb-3 flex flex-col gap-1">
+            <p class="text-slate-500 italic text-center py-4">لا توجد رسائل حالية في الغرفة.. ابدأ بكتابة رسالة!</p>
+        </div>
+        <!-- حقل إدخال وإرسال الرسائل -->
+        <div class="flex gap-2">
+            <input type="text" id="chatInput" onkeypress="handleChatKeyPress(event)" placeholder="اكتب رسالة للجميع هنا..." class="flex-grow bg-slate-900/80 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition">
+            <button onclick="sendChatMessage()" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg text-white transition active:scale-95 flex items-center justify-center">
+                <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </section>
+
+    <!-- تبويب إضافة أسئلة مخصصة في الأسفل -->
+    <footer class="w-full max-w-4xl mx-auto mt-8 border-t border-slate-800 pt-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+        <div>
+            <span>جميع الحقوق محفوظة &copy; 2026 | لعبة صراحة أو تحدي التفاعلية</span>
+        </div>
+        <div class="flex gap-4">
+            <button onclick="toggleCustomQuestionsModal()" class="text-purple-400 hover:text-purple-300 transition flex items-center gap-1">
+                <i data-lucide="edit-3" class="w-4 h-4"></i>
+                <span>إضافة تحديات وأسئلة مخصصة بك</span>
+            </button>
+        </div>
+    </footer>
+
+    <!-- نظام النوافذ المنبثقة التفاعلية المخصصة (بديل كامل لـ alert) -->
+    <div id="customAlert" class="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 hidden">
+        <div class="glass-panel w-full max-w-sm rounded-2xl p-6 text-center space-y-4 border border-purple-500/30">
+            <div id="customAlertIcon" class="mx-auto w-12 h-12 rounded-full flex items-center justify-center bg-purple-900/40 text-purple-400">
+                <i data-lucide="info" class="w-6 h-6"></i>
+            </div>
+            <p id="customAlertText" class="text-sm font-semibold text-white leading-relaxed">تنبيه من النظام</p>
+            <button onclick="closeCustomAlert()" class="w-full bg-purple-600 hover:bg-purple-500 py-2.5 rounded-xl text-xs font-bold text-white transition">موافق</button>
+        </div>
+    </div>
+
+    <!-- نافذة تأكيد الإجراءات (بديل كامل لـ confirm) -->
+    <div id="customConfirm" class="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 hidden">
+        <div class="glass-panel w-full max-w-sm rounded-2xl p-6 text-center space-y-4 border border-purple-500/30">
+            <div class="mx-auto w-12 h-12 rounded-full flex items-center justify-center bg-red-900/40 text-red-400">
+                <i data-lucide="help-circle" class="w-6 h-6"></i>
+            </div>
+            <p id="customConfirmText" class="text-sm font-semibold text-white leading-relaxed">هل أنت متأكد؟</p>
+            <div class="grid grid-cols-2 gap-3">
+                <button id="btnConfirmYes" class="bg-red-600 hover:bg-red-500 py-2.5 rounded-xl text-xs font-bold text-white transition">تأكيد</button>
+                <button onclick="closeCustomConfirm()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 py-2.5 rounded-xl text-xs font-bold text-slate-300 transition">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- نافذة منبثقة لإضافة الأسئلة المخصصة -->
+    <div id="customQuestionsModal" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 hidden">
+        <div class="glass-panel w-full max-w-md rounded-2xl p-6 space-y-4 border border-purple-500/30">
+            <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="edit-3" class="text-purple-400"></i>
+                    <span>إضافة سؤال أو تحدي مخصص</span>
+                </h3>
+                <button onclick="toggleCustomQuestionsModal()" class="text-slate-400 hover:text-white transition">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">النوع:</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="selectCustomType('truth')" id="btnCustomTruth" class="p-2 rounded-lg border-2 border-cyan-500 bg-cyan-950/20 text-xs font-bold text-white text-center">
+                            صراحة (سؤال)
+                        </button>
+                        <button onclick="selectCustomType('dare')" id="btnCustomDare" class="p-2 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300 text-center">
+                            تحدي (فعل)
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">التصنيف المستهدف:</label>
+                    <select id="customCategorySelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
+                        <option value="classic">كلاسيكي</option>
+                        <option value="friends">أصدقاء</option>
+                        <option value="family">عائلي</option>
+                        <option value="daring">حماسي وقوي</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">نص السؤال أو التحدي:</label>
+                    <textarea id="customTextarea" rows="3" placeholder="اكتب سؤالك أو التحدي هنا بكل وضوح..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-purple-500"></textarea>
+                </div>
+
+                <button onclick="saveCustomQuestion()" class="w-full bg-purple-600 hover:bg-purple-500 py-2.5 rounded-lg text-sm font-bold text-white transition">
+                    حفظ وإضافة للمخزون
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- كود الجافا سكربت للتحكم الكامل بآليات اللعبة الفورية والشبكية -->
+    <script>
+        // قاعدة بيانات الأسئلة الافتراضية للعبة
+        const defaultQuestions = {
+            classic: {
+                truth: [
+                    "ما هو أكبر سر أخفيته عن عائلتك حتى الآن؟",
+                    "من هو الشخص الذي تعتبره قدوتك السرية في الحياة؟",
+                    "ما هي أكثر لحظة محرج تعرضت لها في المدرسة أو العمل؟",
+                    "إذا تمنيت أمنية واحدة تتحقق الآن، فماذا ستكون؟",
+                    "ما هو الشيء الذي ندمت على شرائه بشدة مؤخراً؟",
+                    "لو كان بإمكانك تغيير صفة واحدة في شخصيتك، فما هي؟",
+                    "ما هي العادة الغريبة التي تفعلها عندما تكون بمفردك؟"
+                ],
+                dare: [
+                    "قم بالغناء بصوت مرتفع لمدة دقيقة كاملة.",
+                    "تكلم بلهجة مختلفة تماماً حتى يأتي دورك القادم.",
+                    "اتصل بصديق وعبر له عن حبك ثم أغلق الخط فجأة بدون تبرير.",
+                    "قم بـ 15 تمرين ضغط (Pushups) الآن أمام الجميع.",
+                    "افتح معرض الصور في هاتفك واجعل الشخص الذي بجانبك يختار صورة ليراها الجميع.",
+                    "تذوق ملعقة من الخل أو الليمون بدون إظهار أي تعبير على وجهك.",
+                    "قم بتقليد صوت حيوان يختاره اللاعبون من حولك."
+                ]
+            },
+            friends: {
+                truth: [
+                    "من هو الشخص الأكثر كذباً في هذه المجموعة برأيك؟",
+                    "ما هي أول فكرة أو انطباع أخذته عن الشخص الجالس عن يمينك؟",
+                    "هل قمت يوماً بقراءة رسائل شخص آخر دون علمه؟ من هو؟",
+                    "ما هي الرسالة الأخيرة التي أرسلتها عبر واتساب ولماذا؟",
+                    "من هو الشخص الذي تتمنى أن تسافر معه من الموجودين هنا？",
+                    "ما هو الشيء الأكثر إحراجاً الذي قمت به لإثارة إعجاب شخص ما؟",
+                    "هل قمت بنشر إشاعة عن صديق لك من قبل؟"
+                ],
+                dare: [
+                    "دع الشخص الجالس على يسارك يرسل رسالة لأي شخص من هاتفك.",
+                    "تحدّث بلغة إنجليزية مكسرة أو فصحى مضحكة طوال الجولتين القادمتين.",
+                    "دع المجموعة ترسم على وجهك شارباً أو أي رسمة مضحكة باستخدام قلم زائل.",
+                    "قم بالاتصال بوالديك وأخبرهم أنك حصلت على جائزة كبرى بشكل كوميدي.",
+                    "افعل تحدي 'التمثال' ولا تتحرك نهائياً لمدة دقيقة كاملة مهما حدث من حولك.",
+                    "قم بإعطاء هاتفك للشخص الذي أمامك ليتصفح آخر عمليات البحث التي قمت بها.",
+                    "امشِ كعارض أزياء بطريقة مبالغ فيها في الغرفة."
+                ]
+            },
+            family: {
+                truth: [
+                    "ما هي الوجبة المفضلة التي تطبخها والدتك ولا تحبها أنت؟",
+                    "ما هي أكبر كذبة كذبتها على والديك لتفادي العقاب؟",
+                    "أي فرد من العائلة تفضل اللجوء إليه عندما تقع في مشكلة؟",
+                    "ما هي الذكرى العائلية الأكثر دفئاً التي لا تنساها أبداً؟",
+                    "ما هو الشيء الذي تتمنى لو يفهمه أهلك عنك أكثر؟",
+                    "هل قمت بكسر شيء ثمين في المنزل والادعاء بأنك لا تعرف من فعل ذلك؟"
+                ],
+                dare: [
+                    "قم بتقبيل يد رأس والديك أو أرسل لهم رسالة شكر دافئة فوراً.",
+                    "ساعد في ترتيب أو غسيل 3 أطباق في المطبخ الآن.",
+                    "قم بتقليد مشية أو حركات أحد أفراد العائلة ودع الآخرين يخمنون من هو.",
+                    "القي نكتة طريفة ومحترمة تضحك الجميع.",
+                    "تكلم بصوت طفل صغير طوال الجولة القادمة.",
+                    "قم بإلقاء قصيدة أو كلمة شكر دافئة لعائلتك فوراً."
+                ]
+            },
+            daring: {
+                truth: [
+                    "ما هو أكثر حلم غريب أو مرعب حلمت به مؤخراً وتخجل من قوله؟",
+                    "لو خُيّرت بين المال الوفير أو حب حياتك الحقيقي، ماذا تختار بكل أمانة؟",
+                    "هل سبق لك البكاء بسبب التعليقات السلبية على وسائل التواصل الاجتماعي؟",
+                    "ما هو أكبر خطأ ارتكبته في علاقتك السابقة？",
+                    "من هو الشخص الذي تشعر بالغيرة منه سراً في محيطك؟",
+                    "ما هي الفكرة الأكثر جنوناً التي تخطر ببالك لتجربتها يوماً ما؟"
+                ],
+                dare: [
+                    "ضع مكعب ثلج في ملابسك من الخلف وانتظر حتى يذوب تماماً.",
+                    "افتح الكاميرا الأمامية والتقط سيلفي مضحك جداً وانشره كحالة واتساب فوراً.",
+                    "دع أحد اللاعبين يقوم بدغدغتك لمدة 30 ثانية دون أن تضحك أو تصرخ.",
+                    "تناول طعاماً غريباً يخلطه لك الأصدقاء (مثلاً: جبن مع مربى أو شطة).",
+                    "تحدث مع جماد (مثل كرسي أو طاولة) كأنه حب حياتك لمدة دقيقة أمام الجميع.",
+                    "اغمض عينيك ودع الآخرين يطعمونك شيئاً عشوائياً من الثلاجة وعليك تخمينه."
+                ]
+            }
+        };
+
+        // إدارة الحالة العامة للعبة
+        let players = [];
+        let selectedCategory = 'classic';
+        let customQuestions = JSON.parse(localStorage.getItem('customQuestions')) || {
+            classic: { truth: [], dare: [] },
+            friends: { truth: [], dare: [] },
+            family: { truth: [], dare: [] },
+            daring: { truth: [], dare: [] }
+        };
+        let currentPlayerIndex = 0;
+        let selectedOption = ''; // 'truth' or 'dare'
+        let currentQuestionText = '';
+        let isAudioEnabled = true;
+        let activeCustomType = 'truth'; // للنافذة المنبثقة
+        let isSpinning = false; // هل الزجاجة تدور الآن؟
+        let currentRotation = 0; // زاوية الدوران التراكمية
+
+        // متغيرات طور الأونلاين (Online Multi-Player Status)
+        let gameMode = 'local'; // 'local' or 'online'
+        let mqttClient = null;
+        let roomCode = '';
+        let isHost = false;
+        let myClientId = 'user_' + Math.random().toString(36).substr(2, 9);
+        let myNickname = '';
+        let onlinePlayers = []; // [{ id: '...', name: '...', score: 0 }]
+        let activeTurnClientId = ''; // معرف العميل للاعب الذي عليه الدور حالياً في الأونلاين
+
+        // إدارة الاتصال الصوتي عبر بروتوكول WebRTC المباشر وسيرفرات Google STUN الافتراضية المجانية
+        let localVoiceStream = null;
+        let peerConnections = {}; 
+        let isVoiceConnected = false;
+        let isVoiceMuted = false;
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        // تأثيرات صوتية برمجية باستخدام Web Audio API
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (!isAudioEnabled) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'click') {
+                    osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.1);
+                } else if (type === 'success') {
+                    osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); // E5
+                    osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2); // G5
+                    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.4);
+                } else if (type === 'fail') {
+                    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(150, audioCtx.currentTime + 0.3);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.3);
+                } else if (type === 'spin') {
+                    osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.5);
+                    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.5);
+                }
+            } catch (e) {
+                console.log('Audio Context Error:', e);
+            }
+        }
+
+        // دالة نطق تنبيه دور اللاعب بالصوت والمنادي التلقائي عند انتهاء دوران القنينة
+        function speakTurn(playerName) {
+            if (!isAudioEnabled) return;
+            if ('speechSynthesis' in window) {
+                try {
+                    window.speechSynthesis.cancel();
+                    const text = `جاء دورُك يا ${playerName}، اختر صراحة أم تحدي!`;
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'ar-SA';
+                    
+                    // محاولة جلب صوت عربي ناطق بالنظام للظهور بشكل طبيعي وواضح
+                    const voices = window.speechSynthesis.getVoices();
+                    const arVoice = voices.find(v => v.lang.startsWith('ar'));
+                    if (arVoice) {
+                        utterance.voice = arVoice;
+                    }
+                    utterance.pitch = 1.0;
+                    utterance.rate = 1.0;
+                    window.speechSynthesis.speak(utterance);
+                } catch (e) {
+                    console.error("Speech Synthesis Error:", e);
+                }
+            }
+        }
+
+        // تهيئة الأيقونات وتحميل الذاكرة عند بدء التشغيل
+        window.onload = function() {
+            lucide.createIcons();
+            loadPlayersFromStorage();
+            updatePlayersUI();
+            updateScoreBoard();
+        };
+
+        // نظام التنبيه المنبثق المطور (مخصص بدون alert)
+        function showCustomAlert(message, iconName = 'info') {
+            document.getElementById('customAlertText').innerText = message;
+            const container = document.getElementById('customAlertIcon');
+            container.innerHTML = `<i data-lucide="${iconName}" class="w-6 h-6"></i>`;
+            document.getElementById('customAlert').classList.remove('hidden');
+            lucide.createIcons();
+            playSound('click');
+        }
+
+        // إرسال رسالة دردشة في الغرفة أونلاين
+        function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (text === "") return;
+
+            sendMqttMessage({
+                type: 'CHAT_MESSAGE',
+                senderId: myClientId,
+                senderName: myNickname || 'لاعب مجهول',
+                text: text
+            });
+
+            input.value = '';
+            playSound('click');
+        }
+
+        // معالجة الضغط على Enter في الدردشة
+        function handleChatKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendChatMessage();
+            }
+        }
+
+        // إلحاق رسالة الدردشة للواجهة
+        function appendChatMessage(senderName, text, isMe) {
+            const chatMessages = document.getElementById('chatMessages');
+            
+            // إزالة نص الانتظار الافتراضي إن وجد
+            if (chatMessages.querySelector('.text-slate-500')) {
+                chatMessages.innerHTML = '';
+            }
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `flex flex-col max-w-[85%] rounded-lg p-2.5 ${isMe ? 'bg-indigo-600/30 border border-indigo-500/30 mr-auto text-left align-start' : 'bg-slate-800/80 border border-slate-700 ml-auto text-right align-end'}`;
+            
+            msgDiv.innerHTML = `
+                <span class="text-[10px] text-indigo-400 font-bold mb-0.5">${senderName}</span>
+                <span class="text-white break-words text-xs leading-relaxed">${text}</span>
+            `;
+            
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            if (!isMe) {
+                playSound('click');
+            }
+        }
+
+        function closeCustomAlert() {
+            document.getElementById('customAlert').classList.add('hidden');
+            playSound('click');
+        }
+
+        // نظام نافذة التأكيد المنبثقة المطورة (مخصصة بدون confirm)
+        function showCustomConfirm(message, onConfirmCallback) {
+            document.getElementById('customConfirmText').innerText = message;
+            document.getElementById('customConfirm').classList.remove('hidden');
+            
+            // تعيين وظيفة الزر للموافقة
+            document.getElementById('btnConfirmYes').onclick = function() {
+                closeCustomConfirm();
+                onConfirmCallback();
+            };
+            playSound('click');
+        }
+
+        function closeCustomConfirm() {
+            document.getElementById('customConfirm').classList.add('hidden');
+            playSound('click');
+        }
+
+        // تخزين وقراءة اللاعبين في الذاكرة المحلية
+        function savePlayersToStorage() {
+            localStorage.setItem('truthOrDarePlayers', JSON.stringify(players));
+        }
+
+        function loadPlayersFromStorage() {
+            const stored = localStorage.getItem('truthOrDarePlayers');
+            if (stored) {
+                players = JSON.parse(stored);
+            } else {
+                players = [
+                    { name: "أحمد", score: 0 },
+                    { name: "سارة", score: 0 },
+                    { name: "خالد", score: 0 }
+                ];
+            }
+        }
+
+        // التحكم بالصوت والتبديل
+        function toggleAudio() {
+            isAudioEnabled = !isAudioEnabled;
+            const icon = document.getElementById('soundIcon');
+            if (isAudioEnabled) {
+                icon.setAttribute('data-lucide', 'volume-2');
+                document.getElementById('soundBtn').classList.remove('bg-red-950/20', 'text-red-400');
+            } else {
+                icon.setAttribute('data-lucide', 'volume-x');
+                document.getElementById('soundBtn').classList.add('bg-red-950/20', 'text-red-400');
+            }
+            lucide.createIcons();
+            playSound('click');
+        }
+
+        // إعادة ضبط اللعبة بالكامل
+        function confirmResetGame() {
+            showCustomConfirm("هل أنت متأكد من رغبتك في إعادة ضبط اللعبة وحذف جميع اللاعبين والتقدم الحالي؟", function() {
+                if (gameMode === 'online' && mqttClient) {
+                    // إذا كان أونلاين، نقوم بإرسال رسالة تصفير للغرفة بأكملها
+                    sendMqttMessage({ type: 'RESET_GAME' });
+                } else {
+                    players = [];
+                    savePlayersToStorage();
+                    updatePlayersUI();
+                    updateScoreBoard();
+                    backToSetup();
+                }
+                playSound('fail');
+            });
+        }
+
+        // إضافة لاعب جديد (وضع محلي)
+        function addPlayer() {
+            const input = document.getElementById('playerNameInput');
+            const name = input.value.trim();
+            if (name === "") return;
+
+            if (players.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+                showCustomAlert("هذا الاسم موجود بالفعل! يرجى اختيار اسم آخر لتفادي التداخل.", "slash");
+                return;
+            }
+
+            players.push({ name: name, score: 0 });
+            input.value = "";
+            savePlayersToStorage();
+            updatePlayersUI();
+            updateScoreBoard();
+            playSound('click');
+        }
+
+        // حذف لاعب (وضع محلي)
+        function removePlayer(index) {
+            players.splice(index, 1);
+            savePlayersToStorage();
+            updatePlayersUI();
+            updateScoreBoard();
+            playSound('click');
+        }
+
+        // تحديث واجهة قائمة اللاعبين المحليين
+        function updatePlayersUI() {
+            const listContainer = document.getElementById('playersList');
+            const countContainer = document.getElementById('playerCount');
+            
+            countContainer.innerText = players.length;
+            listContainer.innerHTML = '';
+
+            if (players.length === 0) {
+                listContainer.innerHTML = `<span class="text-xs text-slate-500 italic py-1">لا يوجد لاعبين مضافين حالياً..</span>`;
+                return;
+            }
+
+            players.forEach((player, idx) => {
+                const badge = document.createElement('div');
+                badge.className = "flex items-center gap-1.5 bg-slate-800 border border-slate-700 hover:border-purple-500 rounded-full px-3 py-1 text-sm text-slate-200 transition";
+                badge.innerHTML = `
+                    <span>${player.name}</span>
+                    <button onclick="removePlayer(${idx})" class="text-slate-500 hover:text-red-400 focus:outline-none">
+                        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                    </button>
+                `;
+                listContainer.appendChild(badge);
+            });
+            lucide.createIcons();
+        }
+
+        // تحديث لوحة النقاط والترتيب التلقائي بناءً على نقاط اللاعبين
+        function updateScoreBoard() {
+            const board = document.getElementById('scoreBoard');
+            board.innerHTML = '';
+
+            let currentList = (gameMode === 'online') ? onlinePlayers : players;
+
+            if (currentList.length === 0) {
+                board.innerHTML = `<p class="text-xs text-slate-500 italic text-center py-2">لا يوجد لاعبين مسجلين لعرض النقاط.</p>`;
+                return;
+            }
+
+            const sorted = [...currentList].sort((a, b) => b.score - a.score);
+
+            sorted.forEach((player, idx) => {
+                let medalColor = "text-slate-400";
+                if (idx === 0) medalColor = "text-yellow-400"; 
+                if (idx === 1) medalColor = "text-slate-300"; 
+                if (idx === 2) medalColor = "text-amber-600"; 
+
+                const row = document.createElement('div');
+                row.className = "flex items-center justify-between p-2 rounded-lg bg-slate-900/40 border border-slate-800/60";
+                row.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-bold ${medalColor}">#${idx + 1}</span>
+                        <span class="text-sm font-semibold">${player.name}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <span class="text-xs text-slate-400">النقاط:</span>
+                        <span class="text-sm font-black text-purple-400">${player.score}</span>
+                    </div>
+                `;
+                board.appendChild(row);
+            });
+        }
+
+        // اختيار التصنيف الحالي للعبة
+        function selectCategory(cat) {
+            selectedCategory = cat;
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                btn.classList.remove('border-purple-600', 'bg-purple-900/20', 'text-white');
+                btn.classList.add('border-slate-700', 'bg-slate-800/50', 'text-slate-300');
+            });
+
+            const activeBtn = document.getElementById(`cat-${cat}`);
+            activeBtn.classList.remove('border-slate-700', 'bg-slate-800/50', 'text-slate-300');
+            activeBtn.classList.add('border-purple-600', 'bg-purple-900/20', 'text-white');
+            playSound('click');
+
+            // إذا كنا في الأونلاين ونحن المستضيف نقوم بإرسال تغيير التصنيف للجميع
+            if (gameMode === 'online' && isHost) {
+                sendMqttMessage({ type: 'CHANGE_CATEGORY', category: cat });
+            }
+        }
+
+        // التغيير والتبديل بين وضع اللعب المحلي ولعب الأونلاين
+        function setGameMode(mode) {
+            gameMode = mode;
+            const btnLocal = document.getElementById('btnModeLocal');
+            const btnOnline = document.getElementById('btnModeOnline');
+            const localArea = document.getElementById('localSetupArea');
+            const onlineArea = document.getElementById('onlineSetupArea');
+            const txtBtn = document.getElementById('txtStartBtn');
+            const chatSection = document.getElementById('onlineChatSection');
+
+            if (mode === 'local') {
+                btnLocal.className = "p-3 rounded-xl border-2 border-purple-600 bg-purple-900/20 text-white font-bold flex flex-col items-center gap-1 transition-all";
+                btnOnline.className = "p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold flex flex-col items-center gap-1 transition-all";
+                localArea.classList.remove('hidden');
+                onlineArea.classList.add('hidden');
+                chatSection.classList.add('hidden');
+                txtBtn.innerText = "ابدأ اللعبة السحرية!";
+                
+                // إغلاق اتصال MQTT وإيقاف الاتصال الصوتي إن وجد
+                stopLocalVoiceStream();
+                disconnectMqtt();
+            } else {
+                btnOnline.className = "p-3 rounded-xl border-2 border-indigo-600 bg-indigo-900/20 text-white font-bold flex flex-col items-center gap-1 transition-all";
+                btnLocal.className = "p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-bold flex flex-col items-center gap-1 transition-all";
+                localArea.classList.add('hidden');
+                onlineArea.classList.remove('hidden');
+                chatSection.classList.remove('hidden');
+                txtBtn.innerText = "أطلق الغرفة لبدء اللعب!";
+            }
+            playSound('click');
+            updateScoreBoard();
+            lucide.createIcons();
+        }
+
+        // إظهار حقل إدخال رمز الغرفة المجهزة مسبقاً للانضمام
+        function showJoinRoomFields() {
+            document.getElementById('joinFieldsContainer').classList.remove('hidden');
+            playSound('click');
+        }
+
+        // الاتصال الفوري بخادم الويب سوكيت الآمن لتبادل معلومات اللعب
+        function connectToMqttBroker(onSuccessCallback) {
+            if (mqttClient && mqttClient.connected) {
+                if (onSuccessCallback) onSuccessCallback();
+                return;
+            }
+
+            document.getElementById('onlineStatusHeader').innerHTML = `<span class="text-yellow-400 animate-pulse">جاري الاتصال بسيرفر الأونلاين السحري...</span>`;
+            
+            // الاتصال الفوري عبر WSS آمن (SSL/TLS) بخادم EMQX المجاني والمفتوح للمزامنة الفورية
+            mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+                clientId: 'td_client_' + myClientId,
+                clean: true,
+                connectTimeout: 4000,
+                reconnectPeriod: 2000
+            });
+
+            mqttClient.on('connect', () => {
+                document.getElementById('onlineStatusHeader').innerHTML = `<span class="text-emerald-400">● متصل بالغرفة السحابية</span>`;
+                if (onSuccessCallback) onSuccessCallback();
+            });
+
+            mqttClient.on('message', (topic, message) => {
+                try {
+                    const data = JSON.parse(message.toString());
+                    handleIncomingMqttMessage(data);
+                } catch (e) {
+                    console.error("خطأ في قراءة حزمة البيانات المستلمة:", e);
+                }
+            });
+
+            mqttClient.on('error', (err) => {
+                console.error("Mqtt Connection Error:", err);
+                document.getElementById('onlineStatusHeader').innerHTML = `<span class="text-red-400">● انقطع اتصال السيرفر</span>`;
+            });
+        }
+
+        // قطع اتصال الأونلاين
+        function disconnectMqtt() {
+            if (mqttClient) {
+                mqttClient.end();
+                mqttClient = null;
+            }
+            document.getElementById('onlineStatusHeader').innerHTML = "لعبة السهرات والأصدقاء مع ميزة تدوير الزجاجة";
+            document.getElementById('activeRoomContainer').classList.add('hidden');
+            onlinePlayers = [];
+        }
+
+        // إنشاء غرفة جديدة لتبادل حركات اللعبة عبر الإنترنت
+        function createOnlineRoom() {
+            const nicknameInput = document.getElementById('onlineNicknameInput');
+            myNickname = nicknameInput.value.trim();
+            if (myNickname === "") {
+                showCustomAlert("الرجاء إدخال اسم مستعار لك أولاً للتعرف عليك في الغرفة!", "user");
+                return;
+            }
+
+            // توليد رمز غرفة عشوائي وفريد
+            const randomCode = Math.floor(1000 + Math.random() * 9000);
+            roomCode = 'TRUTH-' + randomCode;
+            isHost = true;
+
+            // إعداد القائمة المحلية للغرفة
+            onlinePlayers = [{ id: myClientId, name: myNickname, score: 0 }];
+
+            connectToMqttBroker(() => {
+                // الاشتراك بموضوع (Topic) الغرفة المشترك
+                mqttClient.subscribe(`truth_or_dare/room/${roomCode}`, (err) => {
+                    if (!err) {
+                        document.getElementById('lblRoomCode').innerText = roomCode;
+                        document.getElementById('activeRoomContainer').classList.remove('hidden');
+                        document.getElementById('joinFieldsContainer').classList.add('hidden');
+                        updateOnlinePlayersUI();
+                        showCustomAlert("تم إنشاء الغرفة بنجاح! انسخ الرمز وشاركه مع أصدقائك لينضموا إليك.", "check-circle");
+                    }
+                });
+            });
+        }
+
+        // الانضمام لغرفة تم إنشاؤها مسبقاً من الأصدقاء
+        function joinOnlineRoom() {
+            const nicknameInput = document.getElementById('onlineNicknameInput');
+            const codeInput = document.getElementById('onlineRoomCodeInput');
+            
+            myNickname = nicknameInput.value.trim();
+            let enteredCode = codeInput.value.trim().toUpperCase();
+
+            if (myNickname === "") {
+                showCustomAlert("الرجاء كتابة اسمك المستعار قبل محاولة الانضمام للغرفة!", "user");
+                return;
+            }
+            if (enteredCode === "") {
+                showCustomAlert("الرجاء إدخال رمز الغرفة الذي حصلت عليه من صديقك!", "key");
+                return;
+            }
+
+            roomCode = enteredCode;
+            isHost = false;
+
+            connectToMqttBroker(() => {
+                mqttClient.subscribe(`truth_or_dare/room/${roomCode}`, (err) => {
+                    if (!err) {
+                        document.getElementById('lblRoomCode').innerText = roomCode;
+                        document.getElementById('activeRoomContainer').classList.remove('hidden');
+                        
+                        // إرسال حزمة انضمام إلى المستضيف وبقية اللاعبين فوراً
+                        sendMqttMessage({
+                            type: 'PLAYER_JOIN',
+                            id: myClientId,
+                            name: myNickname
+                        });
+                        
+                        showCustomAlert("تم الاتصال بالغرفة المخصصة! بانتظار مزامنة بقية اللاعبين وبدء اللعبة من قبل المستضيف...", "users");
+                    }
+                });
+            });
+        }
+
+        // نسخ رمز الغرفة إلى الحافظة بسهولة لمشاركته بالواتساب وغيرها
+        function copyRoomCodeToClipboard() {
+            const dummy = document.createElement("textarea");
+            document.body.appendChild(dummy);
+            dummy.value = roomCode;
+            dummy.select();
+            document.execCommand("copy");
+            document.body.removeChild(dummy);
+            showCustomAlert("تم نسخ رمز الغرفة السحابية للحافظة بنجاح!", "check");
+        }
+
+        // إرسال البيانات المباشرة للغرفة
+        function sendMqttMessage(payload) {
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.publish(`truth_or_dare/room/${roomCode}`, JSON.stringify(payload));
+            }
+        }
+
+        // استقبال ومعالجة البيانات المباشرة لجميع حركات اللاعبين في الأونلاين
+        function handleIncomingMqttMessage(data) {
+            switch (data.type) {
+                case 'PLAYER_JOIN':
+                    if (isHost) {
+                        // المستضيف يستقبل العضو الجديد ويضيفه لقائمتنا
+                        if (!onlinePlayers.some(p => p.id === data.id)) {
+                            onlinePlayers.push({ id: data.id, name: data.name, score: 0 });
+                            updateOnlinePlayersUI();
+                            // إرسال القائمة المحدثة بالكامل لجميع الموجودين للوصول لتوافق تام بالشبكة
+                            syncOnlinePlayersToGroup();
+                        }
+                    }
+                    break;
+
+                case 'SYNC_PLAYERS':
+                    // اللاعبين العاديين يزامنون قائمتهم وفق القائمة الرسمية للمستضيف
+                    onlinePlayers = data.players;
+                    updateOnlinePlayersUI();
+                    break;
+
+                case 'CHANGE_CATEGORY':
+                    // مزامنة فئة الأسئلة المستهدفة
+                    selectedCategory = data.category;
+                    document.querySelectorAll('.category-btn').forEach(btn => {
+                        btn.classList.remove('border-purple-600', 'bg-purple-900/20', 'text-white');
+                        btn.classList.add('border-slate-700', 'bg-slate-800/50', 'text-slate-300');
+                    });
+                    const activeBtn = document.getElementById(`cat-${selectedCategory}`);
+                    if (activeBtn) {
+                        activeBtn.classList.remove('border-slate-700', 'bg-slate-800/50', 'text-slate-300');
+                        activeBtn.classList.add('border-purple-600', 'bg-purple-900/20', 'text-white');
+                    }
+                    break;
+
+                case 'GAME_START':
+                    // مزامنة بدء اللعبة والانتقال لشاشة القنينة الدوارة
+                    currentPlayerIndex = data.currentPlayerIndex;
+                    activeTurnClientId = data.activeTurnClientId;
+                    showScreen('bottleScreen');
+                    prepareOnlineBottleUI();
+                    break;
+
+                case 'BOTTLE_SPIN':
+                    // تدوير زجاجة المشروب وحساب زاوية الوقف والضحية المتفق عليها
+                    currentPlayerIndex = data.nextPlayerIndex;
+                    activeTurnClientId = data.activeTurnClientId;
+                    runBottleSpinAnimation(data.targetAngle);
+                    break;
+
+                case 'GO_TO_CHOICE':
+                    // مزامنة شاشة اختيار صراحة أو تحدي
+                    showScreen('gameChoiceScreen');
+                    updateCurrentPlayerUI();
+                    prepareOnlineChoiceUI();
+                    break;
+
+                case 'OPTION_CHOSEN':
+                    // كشف الاختيار من الطرف الآخر، واستيراد نص التحدي/السؤال المناسب محلياً ومشاركته تفادياً للعشوائية المنفصلة
+                    selectedOption = data.option;
+                    currentQuestionText = data.text;
+                    setupOnlineCardUI();
+                    break;
+
+                case 'CARD_REVEAL':
+                    // قلب البطاقة جماعياً لمشاهدة المكتوب في نفس اللحظة
+                    revealCardUIOnly();
+                    break;
+
+                case 'CHAT_MESSAGE':
+                    // استقبال رسائل الدردشة وعرضها فورياً
+                    appendChatMessage(data.senderName, data.text, data.senderId === myClientId);
+                    break;
+
+                case 'VOICE_SIGNAL':
+                    // توجيه إشارات الاتصال الصوتي WebRTC للعميل المستهدف
+                    if (data.targetId === myClientId) {
+                        handleIncomingVoiceSignal(data.senderId, data.signal);
+                    }
+                    break;
+
+                case 'VOICE_ROOM_JOIN':
+                    // تنبيه بأن مستخدماً قد دخل الغرفة الصوتية، المستضيف أو الطرف المعني يقوم بفتح الاتصال
+                    if (isVoiceConnected && data.senderId !== myClientId) {
+                        initiateWebRTCPeerConnection(data.senderId, true);
+                    }
+                    break;
+
+                case 'TURN_RESOLVED':
+                    // حسم النتيجة وتحديث النقاط المعتمدة
+                    onlinePlayers = data.players;
+                    updateScoreBoard();
+                    
+                    // العودة مجدداً لدوران القنينة في الجولة القادمة
+                    currentPlayerIndex = data.nextPlayerIndex;
+                    activeTurnClientId = data.activeTurnClientId;
+                    
+                    setTimeout(() => {
+                        resetBottleScreenUI();
+                        showScreen('bottleScreen');
+                        prepareOnlineBottleUI();
+                    }, 400);
+                    break;
+
+                case 'RESET_GAME':
+                    // إعادة تعيين كلي للغرفة والتقدم
+                    if (isHost) {
+                        onlinePlayers = [{ id: myClientId, name: myNickname, score: 0 }];
+                        syncOnlinePlayersToGroup();
+                    }
+                    backToSetup();
+                    showCustomAlert("تمت إعادة ضبط اللعبة بالكامل من قبل مدير الغرفة.", "rotate-ccw");
+                    break;
+            }
+        }
+
+        // إرسال قائمة اللاعبين الحالية للجميع في المجموعة (من قبل المستضيف حصراً)
+        function syncOnlinePlayersToGroup() {
+            sendMqttMessage({
+                type: 'SYNC_PLAYERS',
+                players: onlinePlayers
+            });
+            updateScoreBoard();
+        }
+
+        // تحديث واجهة اللاعبين المتصلين في الأونلاين داخل لوحة الإعداد
+        function updateOnlinePlayersUI() {
+            const countContainer = document.getElementById('onlinePlayerCount');
+            const listContainer = document.getElementById('onlinePlayersList');
+
+            countContainer.innerText = onlinePlayers.length;
+            listContainer.innerHTML = '';
+
+            onlinePlayers.forEach(player => {
+                const badge = document.createElement('div');
+                badge.className = "flex items-center gap-1 bg-indigo-950/80 border border-indigo-500/30 text-indigo-200 px-3 py-1 rounded-full text-xs";
+                badge.innerHTML = `
+                    <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                    <span>${player.name} ${player.id === myClientId ? "(أنت)" : ""}</span>
+                `;
+                listContainer.appendChild(badge);
+            });
+            lucide.createIcons();
+        }
+
+        // تفعيل أو بدء تشغيل اللعبة السحرية
+        function triggerGameStart() {
+            if (gameMode === 'local') {
+                startGame();
+            } else {
+                // وضع الأونلاين
+                if (!mqttClient || !mqttClient.connected) {
+                    showCustomAlert("الرجاء إنشاء غرفة أو الانضمام لغرفة صديقك قبل بدء تشغيل اللعبة!", "link-2");
+                    return;
+                }
+                if (onlinePlayers.length < 2) {
+                    showCustomAlert("يجب تواجد لاعبين اثنين (2) متصلين على الأقل في غرفتك لبدء اللعب عن بعد!", "users");
+                    return;
+                }
+                if (!isHost) {
+                    showCustomAlert("فقط منشئ الغرفة (المستضيف) يستطيع بدء اللعبة لكامل المجموعة.", "lock");
+                    return;
+                }
+
+                // اختيار لاعب عشوائي لبدء الجولة الأولى
+                const randomIdx = Math.floor(Math.random() * onlinePlayers.length);
+                const firstPlayer = onlinePlayers[randomIdx];
+
+                sendMqttMessage({
+                    type: 'GAME_START',
+                    currentPlayerIndex: randomIdx,
+                    activeTurnClientId: firstPlayer.id
+                });
+            }
+        }
+
+        // بدء اللعب والانتقال لشاشة القنينة الدوارة أولاً (محلي)
+        function startGame() {
+            if (players.length < 2) {
+                showCustomAlert("الرجاء إضافة لاعبين اثنين (2) على الأقل لبدء متعة اللعبة!", "users");
+                return;
+            }
+
+            resetBottleScreenUI();
+            playSound('spin');
+            showScreen('bottleScreen');
+        }
+
+        // تصفير واجهة شاشة دوران القنينة للاستخدام المتكرر
+        function resetBottleScreenUI() {
+            isSpinning = false;
+            document.getElementById('bottle').style.transform = `rotate(0deg)`;
+            currentRotation = 0;
+            
+            const nextBtn = document.getElementById('nextToChoiceBtn');
+            nextBtn.disabled = true;
+            nextBtn.className = "w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all opacity-50 cursor-not-allowed";
+            document.getElementById('bottleResult').innerHTML = `<span class="text-sm text-slate-400">انقر على الزجاجة لتدور وتختار شخصاً عشوائياً!</span>`;
+            
+            document.getElementById('onlineWaitingNotification').classList.add('hidden');
+        }
+
+        // تهيئة واجهة القنينة بما يتناسب مع أدوار الأونلاين والأدوار الفردية
+        function prepareOnlineBottleUI() {
+            const isMyTurn = (activeTurnClientId === myClientId);
+            const activePlayerName = onlinePlayers[currentPlayerIndex].name;
+
+            const inst = document.getElementById('txtSpinInstruction');
+            const bottle = document.getElementById('bottle');
+            const notify = document.getElementById('onlineWaitingNotification');
+            const statusText = document.getElementById('waitingStatusText');
+
+            if (isMyTurn) {
+                inst.innerText = "دورك الآن! انقر على القنينة لتدور في شاشات الجميع بالتزامن!";
+                bottle.style.pointerEvents = "auto";
+                notify.classList.add('hidden');
+            } else {
+                inst.innerText = `بانتظار قيام [${activePlayerName}] بتدوير القنينة السحرية...`;
+                bottle.style.pointerEvents = "none";
+                
+                statusText.innerText = `بانتظار تدوير القنينة من قبل [${activePlayerName}]...`;
+                notify.classList.remove('hidden');
+            }
+        }
+
+        // معالجة الضغط على تدوير القنينة وفقاً لوضع اللعب
+        function triggerBottleSpin() {
+            if (isSpinning) return;
+
+            if (gameMode === 'local') {
+                spinTheBottle();
+            } else {
+                // وضع الأونلاين - التحقق من الدور أولاً
+                if (activeTurnClientId !== myClientId) {
+                    showCustomAlert("ليس دورك للتدوير! يرجى انتظار دور صديقك الحالي.", "clock");
+                    return;
+                }
+
+                // حساب زاوية الوقف والضحية المستهدفة
+                const baseSpins = 5 + Math.floor(Math.random() * 5);
+                const nextPlayerIdx = Math.floor(Math.random() * onlinePlayers.length);
+                const nextPlayer = onlinePlayers[nextPlayerIdx];
+
+                const degreesPerPlayer = 360 / onlinePlayers.length;
+                const targetAngle = (baseSpins * 360) + (nextPlayerIdx * degreesPerPlayer);
+
+                // إرسال الحزمة السحابية للجميع للالتفاف المتزامن المباشر
+                sendMqttMessage({
+                    type: 'BOTTLE_SPIN',
+                    targetAngle: targetAngle,
+                    nextPlayerIndex: nextPlayerIdx,
+                    activeTurnClientId: nextPlayer.id
+                });
+            }
+        }
+
+        // تدوير القنينة حركياً وصوتياً
+        function spinTheBottle() {
+            const baseSpins = 5 + Math.floor(Math.random() * 5);
+            const randomPlayerIndex = Math.floor(Math.random() * players.length);
+            currentPlayerIndex = randomPlayerIndex; // حفظ الضحية
+
+            const degreesPerPlayer = 360 / players.length;
+            const targetAngle = (baseSpins * 360) + (randomPlayerIndex * degreesPerPlayer);
+            
+            runBottleSpinAnimation(targetAngle);
+        }
+
+        // تدوير القنينة حركياً ومحاكاة دقات الالتفاف
+        function runBottleSpinAnimation(targetAngle) {
+            isSpinning = true;
+            playSound('spin');
+
+            const bottle = document.getElementById('bottle');
+            const resultDiv = document.getElementById('bottleResult');
+            const nextBtn = document.getElementById('nextToChoiceBtn');
+
+            resultDiv.innerHTML = `<span class="text-sm text-purple-400 animate-pulse">جارٍ تدوير القنينة واختيار القدر...</span>`;
+
+            currentRotation = targetAngle;
+            bottle.style.transform = `rotate(${currentRotation}deg)`;
+
+            // صوت تكتكة دوران القنينة المتكرر
+            let spinSoundInterval = setInterval(() => {
+                playSound('click');
+            }, 250);
+
+            setTimeout(() => {
+                clearInterval(spinSoundInterval);
+                isSpinning = false;
+                
+                let chosenPlayerName = (gameMode === 'online') ? onlinePlayers[currentPlayerIndex].name : players[currentPlayerIndex].name;
+                playSound('success');
+
+                resultDiv.innerHTML = `
+                    <div class="animate-bounce">
+                        <span class="text-xs text-slate-400 block">وقع الاختيار على</span>
+                        <strong class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-400">${chosenPlayerName} ✨</strong>
+                    </div>
+                `;
+
+                // نطق اسم اللاعب الذي تم اختياره بالصوت التلقائي والمنادي
+                speakTurn(chosenPlayerName);
+
+                // التحكم بإتاحة زر المتابعة
+                if (gameMode === 'local' || (gameMode === 'online' && activeTurnClientId === myClientId)) {
+                    nextBtn.disabled = false;
+                    nextBtn.className = "w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg shadow-purple-900/40 cursor-pointer";
+                } else {
+                    nextBtn.disabled = true;
+                    nextBtn.className = "w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all opacity-50 cursor-not-allowed";
+                }
+            }, 3000);
+        }
+
+        // معالجة الضغط للانتقال لشاشة صراحة وتحدي
+        function triggerChoiceScreenTransition() {
+            if (gameMode === 'local') {
+                goToChoiceScreen();
+            } else {
+                if (activeTurnClientId !== myClientId) return;
+                sendMqttMessage({ type: 'GO_TO_CHOICE' });
+            }
+        }
+
+        // الانتقال لشاشة الاختيار الفعلية
+        function goToChoiceScreen() {
+            playSound('click');
+            showScreen('gameChoiceScreen');
+            updateCurrentPlayerUI();
+            
+            if (gameMode === 'online') {
+                prepareOnlineChoiceUI();
+            }
+        }
+
+        // تحديث واجهة اسم اللاعب الحالي الذي عليه الدور
+        function updateCurrentPlayerUI() {
+            let activeName = (gameMode === 'online') ? onlinePlayers[currentPlayerIndex].name : players[currentPlayerIndex].name;
+            document.getElementById('currentPlayerName').innerText = activeName;
+        }
+
+        // تهيئة واجهة اختيار الصراحة والتحدي في الأونلاين لمنع تداخل الآخرين
+        function prepareOnlineChoiceUI() {
+            const isMyTurn = (activeTurnClientId === myClientId);
+            const activePlayerName = onlinePlayers[currentPlayerIndex].name;
+
+            const inst = document.getElementById('txtChoiceInstruction');
+            const btnTruth = document.getElementById('btnOptionTruth');
+            const btnDare = document.getElementById('btnOptionDare');
+            const notify = document.getElementById('onlineWaitingNotification');
+            const statusText = document.getElementById('waitingStatusText');
+
+            if (isMyTurn) {
+                inst.innerText = "اختر مصيرك لتستمر في اللعب أو تخرج!";
+                btnTruth.style.pointerEvents = "auto";
+                btnDare.style.pointerEvents = "auto";
+                notify.classList.add('hidden');
+            } else {
+                inst.innerText = `بانتظار اختيار [${activePlayerName}] لمصيره...`;
+                btnTruth.style.pointerEvents = "none";
+                btnDare.style.pointerEvents = "none";
+                
+                statusText.innerText = `بانتظار كشف واختيار [${activePlayerName}]...`;
+                notify.classList.remove('hidden');
+            }
+        }
+
+        // اتخاذ قرار صراحة أو تحدي من اللاعب الفعال
+        function triggerOptionChoice(option) {
+            if (gameMode === 'local') {
+                chooseOption(option);
+            } else {
+                if (activeTurnClientId !== myClientId) return;
+
+                // حساب نص التحدي/السؤال المناسب محلياً ومشاركته تفادياً للعشوائية المنفصلة
+                const defaultPool = defaultQuestions[selectedCategory][option];
+                const customPool = customQuestions[selectedCategory][option] || [];
+                const fullPool = [...defaultPool, ...customPool];
+                const randomIndex = Math.floor(Math.random() * fullPool.length);
+                const text = fullPool[randomIndex];
+
+                sendMqttMessage({
+                    type: 'OPTION_CHOSEN',
+                    option: option,
+                    text: text
+                });
+            }
+        }
+
+        // تفعيل وحساب الصراحة أو التحدي
+        function chooseOption(option) {
+            selectedOption = option;
+            playSound('spin');
+
+            const defaultPool = defaultQuestions[selectedCategory][option];
+            const customPool = customQuestions[selectedCategory][option] || [];
+            const fullPool = [...defaultPool, ...customPool];
+
+            const randomIndex = Math.floor(Math.random() * fullPool.length);
+            currentQuestionText = fullPool[randomIndex];
+
+            setupOnlineCardUI();
+        }
+
+        // تجميع وتجهيز بطاقة اللعب بناءً على الاختيار
+        function setupOnlineCardUI() {
+            const badge = document.getElementById('cardBadge');
+            const playerTag = document.getElementById('cardPlayerTag');
+            const mainText = document.getElementById('cardMainText');
+            const isMyTurn = (gameMode === 'local' || activeTurnClientId === myClientId);
+
+            playerTag.innerText = (gameMode === 'online') ? onlinePlayers[currentPlayerIndex].name : players[currentPlayerIndex].name;
+            mainText.innerText = currentQuestionText;
+
+            if (selectedOption === 'truth') {
+                badge.innerText = 'صراحة (سؤال)';
+                badge.className = 'px-3 py-1 rounded-full text-xs font-bold text-white bg-cyan-600 border border-cyan-400';
+            } else {
+                badge.innerText = 'تحدي (فعل)';
+                badge.className = 'px-3 py-1 rounded-full text-xs font-bold text-white bg-rose-600 border border-rose-400';
+            }
+
+            // تهيئة حواف البطاقة وفق اللاعب الحالي
+            const cardFront = document.getElementById('cardFrontSide');
+            const notify = document.getElementById('onlineWaitingNotification');
+            const statusText = document.getElementById('waitingStatusText');
+            const frontDesc = document.getElementById('txtCardFrontDesc');
+
+            if (isMyTurn) {
+                cardFront.style.pointerEvents = "auto";
+                frontDesc.innerText = "اضغط على البطاقة لكشف المهمة المطلوبة منك";
+                notify.classList.add('hidden');
+            } else {
+                cardFront.style.pointerEvents = "none";
+                frontDesc.innerText = "بانتظار قيام اللاعب بكشف البطاقة السحرية أمام الجميع...";
+                
+                statusText.innerText = "بانتظار كشف محتوى البطاقة...";
+                notify.classList.remove('hidden');
+            }
+
+            document.getElementById('cardInner').classList.remove('card-flipped');
+            document.getElementById('actionButtons').classList.add('hidden');
+            showScreen('cardScreen');
+        }
+
+        // تفعيل كشف البطاقة لجميع أطراف الغرفة
+        function triggerCardReveal() {
+            if (gameMode === 'local') {
+                revealCard();
+            } else {
+                if (activeTurnClientId !== myClientId) return;
+                sendMqttMessage({ type: 'CARD_REVEAL' });
+            }
+        }
+
+        // كشف أو قلب البطاقة
+        function revealCard() {
+            const cardInner = document.getElementById('cardInner');
+            if (!cardInner.classList.contains('card-flipped')) {
+                revealCardUIOnly();
+            }
+        }
+
+        // قلب البطاقة واجهياً فقط
+        function revealCardUIOnly() {
+            const cardInner = document.getElementById('cardInner');
+            cardInner.classList.add('card-flipped');
+            playSound('click');
+
+            // إتاحة الأزرار للاعب الحالي فقط
+            const isMyTurn = (gameMode === 'local' || activeTurnClientId === myClientId);
+            if (isMyTurn) {
+                setTimeout(() => {
+                    document.getElementById('actionButtons').classList.remove('hidden');
+                }, 300);
+            }
+        }
+
+        // حسم الجولة الحالية (تم بنجاح أو انسحاب) وتحديث النقاط
+        function triggerTurnResolve(success) {
+            if (gameMode === 'local') {
+                resolveTurn(success);
+            } else {
+                if (activeTurnClientId !== myClientId) return;
+
+                // تحديث النقاط محلياً أولاً
+                const player = onlinePlayers.find(p => p.id === myClientId);
+                if (player && success) {
+                    player.score += 1;
+                }
+
+                // حساب اللاعب التالي تتابعياً
+                const nextIdx = (currentPlayerIndex + 1) % onlinePlayers.length;
+                const nextPlayer = onlinePlayers[nextIdx];
+
+                sendMqttMessage({
+                    type: 'TURN_RESOLVED',
+                    players: onlinePlayers,
+                    nextPlayerIndex: nextIdx,
+                    activeTurnClientId: nextPlayer.id
+                });
+            }
+        }
+
+        // حسم الجولة محلياً وتحديد اللاعب القادم
+        function resolveTurn(success) {
+            const player = players[currentPlayerIndex];
+            if (success) {
+                player.score += 1;
+                playSound('success');
+            } else {
+                playSound('fail');
+            }
+
+            savePlayersToStorage();
+            updateScoreBoard();
+
+            // الذهاب تلقائياً لتدوير القنينة مجدداً للجولة التالية
+            setTimeout(() => {
+                startGame();
+            }, 300);
+        }
+
+        // العودة لشاشة الإعداد واللاعبين
+        function backToSetup() {
+            showScreen('setupScreen');
+            playSound('click');
+        }
+
+        // دالة مساعدة للتنقل المريح بين شاشات اللعب المختلفة
+        function showScreen(screenId) {
+            document.getElementById('setupScreen').classList.add('hidden');
+            document.getElementById('bottleScreen').classList.add('hidden');
+            document.getElementById('gameChoiceScreen').classList.add('hidden');
+            document.getElementById('cardScreen').classList.add('hidden');
+
+            document.getElementById(screenId).classList.remove('hidden');
+        }
+
+        // التحكم بالنافذة المنبثقة للأسئلة المخصصة
+        function toggleCustomQuestionsModal() {
+            const modal = document.getElementById('customQuestionsModal');
+            modal.classList.toggle('hidden');
+            playSound('click');
+        }
+
+        // اختيار نوع السؤال المخصص بالنافذة المنبثقة
+        function selectCustomType(type) {
+            activeCustomType = type;
+            const btnTruth = document.getElementById('btnCustomTruth');
+            const btnDare = document.getElementById('btnCustomDare');
+
+            if (type === 'truth') {
+                btnTruth.className = "p-2 rounded-lg border-2 border-cyan-500 bg-cyan-950/20 text-xs font-bold text-white text-center";
+                btnDare.className = "p-2 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300 text-center";
+            } else {
+                btnTruth.className = "p-2 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300 text-center";
+                btnDare.className = "p-2 rounded-lg border-2 border-rose-500 bg-rose-950/20 text-xs font-bold text-white text-center";
+            }
+            playSound('click');
+        }
+
+        // حفظ السؤال المخصص بالذاكرة المحلية ومزامنته
+        function saveCustomQuestion() {
+            const textInput = document.getElementById('customTextarea');
+            const text = textInput.value.trim();
+            const cat = document.getElementById('customCategorySelect').value;
+
+            if (text === "") {
+                showCustomAlert("الرجاء كتابة نص التحدي أو السؤال المخصص أولاً لتتمكن من حفظه!", "edit");
+                return;
+            }
+
+            if (!customQuestions[cat]) {
+                customQuestions[cat] = { truth: [], dare: [] };
+            }
+
+            customQuestions[cat][activeCustomType].push(text);
+            localStorage.setItem('customQuestions', JSON.stringify(customQuestions));
+
+            showCustomAlert("تمت إضافة سؤالك المخصص بنجاح إلى قاعدة اللعبة!", "check-circle");
+            textInput.value = "";
+            toggleCustomQuestionsModal();
+            playSound('success');
+        }
+
+        /* =========================================================
+           منظومة الاتصال والمحادثة الصوتية المباشرة (Mesh WebRTC Audio Room)
+           =========================================================
+        */
+
+        // تفعيل أو إلغاء تفعيل الاتصال الصوتي
+        async function toggleWebRTCVoiceChat() {
+            const btn = document.getElementById('btnToggleVoiceChat');
+            const muteBtn = document.getElementById('btnMuteVoice');
+            const statusDot = document.getElementById('voiceStatusDot');
+            const statusText = document.getElementById('voiceStatusText');
+
+            if (!isVoiceConnected) {
+                try {
+                    // طلب صلاحية الميكروفون
+                    localVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    isVoiceConnected = true;
+                    isVoiceMuted = false;
+
+                    btn.innerHTML = `<i data-lucide="phone-off" class="w-3.5 h-3.5"></i><span>مغادرة المحادثة الصوتية</span>`;
+                    btn.className = "flex-grow bg-rose-600 hover:bg-rose-500 text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition active:scale-95";
+                    muteBtn.classList.remove('hidden');
+                    updateMicIcon();
+
+                    statusDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                    statusText.innerText = "متصل بالصوت المباشر";
+
+                    // إخبار بقية اللاعبين المتواجدين حالياً بالرغبة بالربط الصوتي
+                    sendMqttMessage({
+                        type: 'VOICE_ROOM_JOIN',
+                        senderId: myClientId
+                    });
+
+                    // إنشاء اتصالات مع كافة المتصلين النشطين
+                    onlinePlayers.forEach(player => {
+                        if (player.id !== myClientId) {
+                            initiateWebRTCPeerConnection(player.id, true);
+                        }
+                    });
+
+                    showCustomAlert("تم تفعيل ميكروفونك والدخول للمحادثة الصوتية بنجاح!", "mic");
+
+                } catch (err) {
+                    console.error("تعذر الوصول للميكروفون:", err);
+                    showCustomAlert("فشل الانضمام للصوت: يرجى التحقق من منح المتصفح صلاحية استخدام الميكروفون.", "shield-alert");
+                }
+            } else {
+                // إيقاف الاتصال الصوتي بالكامل
+                stopLocalVoiceStream();
+            }
+            lucide.createIcons();
+            playSound('click');
+        }
+
+        // إغلاق وبث إيقاف الاتصال الصوتي
+        function stopLocalVoiceStream() {
+            if (localVoiceStream) {
+                localVoiceStream.getTracks().forEach(track => track.stop());
+                localVoiceStream = null;
+            }
+
+            // إغلاق اتصالات الأقران
+            for (let peerId in peerConnections) {
+                if (peerConnections[peerId]) {
+                    peerConnections[peerId].close();
+                }
+            }
+            peerConnections = {};
+
+            isVoiceConnected = false;
+            
+            const btn = document.getElementById('btnToggleVoiceChat');
+            const muteBtn = document.getElementById('btnMuteVoice');
+            const statusDot = document.getElementById('voiceStatusDot');
+            const statusText = document.getElementById('voiceStatusText');
+
+            btn.innerHTML = `<i data-lucide="mic" class="w-3.5 h-3.5"></i><span>دخول المحادثة الصوتية</span>`;
+            btn.className = "flex-grow bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition active:scale-95";
+            muteBtn.classList.add('hidden');
+
+            statusDot.className = "w-2 h-2 rounded-full bg-slate-500";
+            statusText.innerText = "غير متصل بالصوت";
+
+            // إزالة قنوات الصوت المستلمة من الصفحة
+            document.querySelectorAll('.remote-audio-element').forEach(el => el.remove());
+            lucide.createIcons();
+        }
+
+        // كتم أو تشغيل الميكروفون المحلي
+        function toggleLocalVoiceMute() {
+            if (localVoiceStream) {
+                isVoiceMuted = !isVoiceMuted;
+                localVoiceStream.getAudioTracks().forEach(track => {
+                    track.enabled = !isVoiceMuted;
+                });
+                updateMicIcon();
+                playSound('click');
+            }
+        }
+
+        // تحديث أيقونة الميكروفون بناء على حالة الكتم
+        function updateMicIcon() {
+            const icon = document.getElementById('micIcon');
+            if (isVoiceMuted) {
+                icon.setAttribute('data-lucide', 'mic-off');
+                icon.className = "w-4 h-4 text-red-500";
+            } else {
+                icon.setAttribute('data-lucide', 'mic');
+                icon.className = "w-4 h-4 text-emerald-400";
+            }
+            lucide.createIcons();
+        }
+
+        // إنشاء اتصال Peer Connection مع مستخدم بعيد
+        function initiateWebRTCPeerConnection(peerId, createOffer = false) {
+            if (peerConnections[peerId]) {
+                peerConnections[peerId].close();
+            }
+
+            const pc = new RTCPeerConnection(rtcConfig);
+            peerConnections[peerId] = pc;
+
+            // إضافة المسارات الصوتية المحلية للاتصال
+            if (localVoiceStream) {
+                localVoiceStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localVoiceStream);
+                });
+            }
+
+            // تبادل ICE Candidates
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    sendMqttMessage({
+                        type: 'VOICE_SIGNAL',
+                        senderId: myClientId,
+                        targetId: peerId,
+                        signal: { candidate: event.candidate }
+                    });
+                }
+            };
+
+            // استقبال المسار الصوتي للقرين البعيد وتشغيله تلقائياً
+            pc.ontrack = (event) => {
+                let audioEl = document.getElementById(`audio_${peerId}`);
+                if (!audioEl) {
+                    audioEl = document.createElement('audio');
+                    audioEl.id = `audio_${peerId}`;
+                    audioEl.className = 'remote-audio-element hidden';
+                    audioEl.autoplay = true;
+                    document.body.appendChild(audioEl);
+                }
+                audioEl.srcObject = event.streams[0];
+            };
+
+            // إنشاء عرض الاتصال (Offer)
+            if (createOffer) {
+                pc.createOffer().then(offer => {
+                    return pc.setLocalDescription(offer);
+                }).then(() => {
+                    sendMqttMessage({
+                        type: 'VOICE_SIGNAL',
+                        senderId: myClientId,
+                        targetId: peerId,
+                        signal: { sdp: pc.localDescription }
+                    });
+                }).catch(err => console.error("فشل إنشاء عرض الاتصال الصوتي:", err));
+            }
+        }
+
+        // معالجة إشارات الصوت القادمة من أطراف الغرفة
+        function handleIncomingVoiceSignal(senderId, signal) {
+            // التحقق من تفعيل الصوت محلياً لتمرير الإرسال
+            if (!isVoiceConnected) return;
+
+            let pc = peerConnections[senderId];
+            if (!pc) {
+                initiateWebRTCPeerConnection(senderId, false);
+                pc = peerConnections[senderId];
+            }
+
+            if (signal.sdp) {
+                pc.setRemoteDescription(new RTCSessionDescription(signal.sdp))
+                    .then(() => {
+                        if (pc.remoteDescription.type === 'offer') {
+                            return pc.createAnswer().then(answer => {
+                                return pc.setLocalDescription(answer);
+                            }).then(() => {
+                                sendMqttMessage({
+                                    type: 'VOICE_SIGNAL',
+                                    senderId: myClientId,
+                                    targetId: senderId,
+                                    signal: { sdp: pc.localDescription }
+                                });
+                            });
+                        }
+                    }).catch(err => console.error("خطأ في معالجة إشارة SDP الصوتية:", err));
+            } else if (signal.candidate) {
+                pc.addIceCandidate(new RTCIceCandidate(signal.candidate))
+                    .catch(err => console.error("خطأ في إضافة ICE Candidate:", err));
+            }
+        }
+    </script>
+</body>
+</html>
